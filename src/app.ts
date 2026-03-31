@@ -1,46 +1,78 @@
 import { resolve } from "node:path";
 
 import cors from "@fastify/cors";
+import helmet from "@fastify/helmet";
 import fastifyStatic from "@fastify/static";
 import Fastify, { type FastifyInstance } from "fastify";
-import { z } from "zod";
+import { z, ZodError } from "zod";
 
 import { ChainRegistry } from "./chains/registry.js";
 import { loadConfig } from "./config.js";
 import { DatabaseStore } from "./db/store.js";
 import { MonitorService } from "./services/monitor-service.js";
 import { WatchService } from "./services/watch-service.js";
+import { isAuthorized } from "./utils/auth.js";
 import { ResponseCache } from "./utils/cache.js";
 import { buildFilterKey, buildPayerListEtag } from "./utils/etag.js";
+import { toSafeErrorMessage } from "./utils/errors.js";
 import { normalizeAddress } from "./utils/address.js";
 import { nowIso } from "./utils/time.js";
-import { SUPPORTED_CHAIN_KEYS, type AppConfig, type ChainKey } from "./types.js";
+import { SUPPORTED_CHAIN_KEYS, type AppConfig } from "./types.js";
 
 const chainKeySchema = z.enum(SUPPORTED_CHAIN_KEYS);
+const safeDisplayString = z.string().trim().min(1).max(120).regex(/^[^\u0000-\u001F\u007F]*$/u);
+const safeTokenKey = z.string().trim().min(1).max(64).regex(/^[a-z0-9._-]+$/i);
+const safeTokenSymbol = z.string().trim().min(1).max(20).regex(/^[A-Z0-9._-]+$/i);
 
 const createWatchBodySchema = z.object({
   address: z.string().trim(),
-  label: z.string().trim().max(120).optional(),
-  chains: z.array(chainKeySchema).min(1),
+  label: safeDisplayString.optional(),
+  chains: z
+    .array(chainKeySchema)
+    .min(1)
+    .max(SUPPORTED_CHAIN_KEYS.length)
+    .superRefine((chains, ctx) => {
+      if (new Set(chains).size !== chains.length) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "Chains must be unique",
+        });
+      }
+    }),
   includeDefaultTokens: z.boolean().optional().default(true),
-  lookbackBlocks: z.coerce.number().int().min(0).max(2_000_000).optional(),
+  lookbackBlocks: z.coerce.number().int().min(0).max(250_000).optional(),
   customTokens: z
     .array(
       z.object({
         chainKey: chainKeySchema,
-        key: z.string().trim().max(64).optional(),
-        symbol: z.string().trim().min(1).max(20),
+        key: safeTokenKey.optional(),
+        symbol: safeTokenSymbol,
         address: z.string().trim(),
         decimals: z.number().int().min(0).max(36),
       }),
     )
+    .max(32)
     .optional()
-    .default([]),
+    .default([])
+    .superRefine((tokens, ctx) => {
+      const seen = new Set<string>();
+
+      for (const token of tokens) {
+        const key = `${token.chainKey}:${token.address.toLowerCase()}`;
+        if (seen.has(key)) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: `Duplicate custom token definition for ${token.chainKey}:${token.address}`,
+          });
+        }
+        seen.add(key);
+      }
+    }),
 });
 
 const listQuerySchema = z.object({
   chainKey: chainKeySchema.optional(),
-  tokenKey: z.string().trim().min(1).max(64).optional(),
+  tokenKey: safeTokenKey.optional(),
 });
 
 const paymentsQuerySchema = listQuerySchema.extend({
@@ -60,16 +92,60 @@ export async function createApp(config: AppConfig = loadConfig()): Promise<AppCo
     logger: {
       level: process.env.LOG_LEVEL ?? "info",
     },
+    bodyLimit: config.bodyLimitBytes,
   });
 
   const store = new DatabaseStore(config.databasePath);
   const registry = new ChainRegistry(config.enabledChains);
   const watchService = new WatchService(store, registry, app.log);
-  const payersCache = new ResponseCache<unknown>(config.httpCacheTtlMs);
+  const payersCache = new ResponseCache<unknown>(config.httpCacheTtlMs, config.cacheMaxEntries);
   const monitor = new MonitorService(store, registry, app.log, config.pollIntervalMs);
 
-  await app.register(cors, {
-    origin: true,
+  await app.register(helmet, {
+    global: true,
+    contentSecurityPolicy: config.adminUiEnabled
+      ? {
+          directives: {
+            defaultSrc: ["'self'"],
+            scriptSrc: ["'self'"],
+            styleSrc: ["'self'"],
+            imgSrc: ["'self'", "data:"],
+            connectSrc: ["'self'"],
+            objectSrc: ["'none'"],
+            baseUri: ["'self'"],
+            frameAncestors: ["'none'"],
+          },
+        }
+      : false,
+    crossOriginEmbedderPolicy: false,
+  });
+
+  if (config.allowedOrigins.length > 0) {
+    await app.register(cors, {
+      origin: (origin, callback) => {
+        if (!origin) {
+          callback(null, true);
+          return;
+        }
+
+        callback(null, config.allowedOrigins.includes(origin));
+      },
+    });
+  }
+
+  app.addHook("onRequest", async (request, reply) => {
+    if (!request.url.startsWith("/v1/") || request.url === "/v1/health") {
+      return;
+    }
+
+    if (isAuthorized(request.headers, config.authTokens)) {
+      return;
+    }
+
+    reply
+      .code(401)
+      .header("WWW-Authenticate", 'Bearer realm="stablecoin-payments-service"')
+      .send({ error: "Unauthorized" });
   });
 
   if (config.adminUiEnabled) {
@@ -88,6 +164,7 @@ export async function createApp(config: AppConfig = loadConfig()): Promise<AppCo
     status: "ok",
     timestamp: nowIso(),
     enabledChains: config.enabledChains,
+    authEnabled: config.authTokens.length > 0,
   }));
 
   app.get("/v1/registry", async () => ({
@@ -217,7 +294,7 @@ export async function createApp(config: AppConfig = loadConfig()): Promise<AppCo
 
   app.setErrorHandler((error, _request, reply) => {
     app.log.error({ err: error }, "Request failed");
-    const message = error instanceof Error ? error.message : String(error);
+
     const statusCode =
       typeof error === "object" &&
       error !== null &&
@@ -225,8 +302,25 @@ export async function createApp(config: AppConfig = loadConfig()): Promise<AppCo
       typeof error.statusCode === "number"
         ? error.statusCode
         : 400;
+
+    const isValidationError = error instanceof ZodError;
+    const responseMessage =
+      statusCode >= 500
+        ? "Internal server error"
+        : isValidationError
+          ? "Invalid request"
+          : toSafeErrorMessage(error, "Request failed");
+
     reply.code(statusCode).send({
-      error: message,
+      error: responseMessage,
+      ...(isValidationError
+        ? {
+            details: error.issues.map((issue) => ({
+              path: issue.path.join("."),
+              message: issue.message,
+            })),
+          }
+        : {}),
     });
   });
 

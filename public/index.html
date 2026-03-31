@@ -18,6 +18,26 @@
 
       <section class="card">
         <div class="section-head">
+          <h2>Secure access</h2>
+          <span id="authState" class="pill subtle">No token set</span>
+        </div>
+        <div class="stack">
+          <label>
+            API token
+            <input id="authToken" name="authToken" type="password" placeholder="Paste AUTH_TOKENS value" autocomplete="off" />
+          </label>
+          <div class="button-row">
+            <button id="saveTokenButton" class="ghost" type="button">Save token</button>
+            <button id="clearTokenButton" class="ghost" type="button">Clear token</button>
+          </div>
+          <p class="hint">
+            The UI stores the token in this browser session only and sends it as a bearer token on API requests.
+          </p>
+        </div>
+      </section>
+
+      <section class="card">
+        <div class="section-head">
           <h2>Create or update a watch</h2>
           <button id="refreshButton" class="ghost" type="button">Refresh</button>
         </div>

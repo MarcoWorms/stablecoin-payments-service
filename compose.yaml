@@ -2,10 +2,20 @@ services:
   stablecoin-payments:
     build:
       context: .
+    environment:
+      NODE_ENV: production
     ports:
       - "3000:3000"
     env_file:
       - .env
     volumes:
       - ./data:/app/data
+    tmpfs:
+      - /tmp
+    read_only: true
+    init: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
     restart: unless-stopped

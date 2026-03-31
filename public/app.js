@@ -6,6 +6,10 @@ const elements = {
   refreshButton: document.querySelector("#refreshButton"),
   watchDetails: document.querySelector("#watchDetails"),
   selectedWatchBadge: document.querySelector("#selectedWatchBadge"),
+  authToken: document.querySelector("#authToken"),
+  authState: document.querySelector("#authState"),
+  saveTokenButton: document.querySelector("#saveTokenButton"),
+  clearTokenButton: document.querySelector("#clearTokenButton"),
 };
 
 let state = {
@@ -14,15 +18,75 @@ let state = {
   selectedWatchId: null,
 };
 
+const authStorageKey = "stablecoin-payments-auth-token";
+
+function escapeHtml(value) {
+  return String(value).replace(/[&<>"']/g, (character) => {
+    switch (character) {
+      case "&":
+        return "&amp;";
+      case "<":
+        return "&lt;";
+      case ">":
+        return "&gt;";
+      case '"':
+        return "&quot;";
+      case "'":
+        return "&#39;";
+      default:
+        return character;
+    }
+  });
+}
+
+function getStoredToken() {
+  return sessionStorage.getItem(authStorageKey) || "";
+}
+
+function setStoredToken(token) {
+  if (token) {
+    sessionStorage.setItem(authStorageKey, token);
+  } else {
+    sessionStorage.removeItem(authStorageKey);
+  }
+  syncAuthUi();
+}
+
+function syncAuthUi() {
+  const token = getStoredToken();
+  elements.authToken.value = token;
+  elements.authState.textContent = token ? "Token loaded" : "No token set";
+}
+
+async function apiFetch(path, options = {}) {
+  const headers = new Headers(options.headers || {});
+  const token = getStoredToken();
+
+  if (token) {
+    headers.set("authorization", `Bearer ${token}`);
+  }
+
+  const response = await fetch(path, {
+    ...options,
+    headers,
+  });
+
+  if (response.status === 401) {
+    throw new Error("Unauthorized. Set a valid API token in the UI first.");
+  }
+
+  return response;
+}
+
 async function loadRegistry() {
-  const response = await fetch("/v1/registry");
+  const response = await apiFetch("/v1/registry");
   const payload = await response.json();
   state.registry = payload.chains;
   renderChains();
 }
 
 async function loadWatches() {
-  const response = await fetch("/v1/watches");
+  const response = await apiFetch("/v1/watches");
   const payload = await response.json();
   state.watches = payload.items;
   renderWatches();
@@ -39,8 +103,8 @@ function renderChains() {
     const label = document.createElement("label");
     label.className = "chip";
     label.innerHTML = `
-      <input type="checkbox" name="chains" value="${chain.key}" />
-      <span>${chain.name}</span>
+      <input type="checkbox" name="chains" value="${escapeHtml(chain.key)}" />
+      <span>${escapeHtml(chain.name)}</span>
     `;
     elements.chains.appendChild(label);
   }
@@ -57,10 +121,10 @@ function renderWatches() {
       const activeTargets = watch.targets.filter((target) => target.isActive);
       return `
         <article class="watch-item">
-          <h3>${watch.label || "Unlabeled watch"}</h3>
-          <div class="mono">${watch.address}</div>
+          <h3>${escapeHtml(watch.label || "Unlabeled watch")}</h3>
+          <div class="mono">${escapeHtml(watch.address)}</div>
           <p>${activeTargets.length} active token monitors</p>
-          <button class="ghost" type="button" data-watch-id="${watch.id}">Inspect</button>
+          <button class="ghost" type="button" data-watch-id="${escapeHtml(watch.id)}">Inspect</button>
         </article>
       `;
     })
@@ -77,9 +141,9 @@ function renderWatches() {
 async function showWatch(watchId) {
   state.selectedWatchId = watchId;
   const [watchResponse, payersResponse, paymentsResponse] = await Promise.all([
-    fetch(`/v1/watches/${watchId}`),
-    fetch(`/v1/watches/${watchId}/payers`),
-    fetch(`/v1/watches/${watchId}/payments?limit=10`),
+    apiFetch(`/v1/watches/${watchId}`),
+    apiFetch(`/v1/watches/${watchId}/payers`),
+    apiFetch(`/v1/watches/${watchId}/payments?limit=10`),
   ]);
 
   if (!watchResponse.ok) {
@@ -99,8 +163,8 @@ async function showWatch(watchId) {
     .map(
       (target) => `
         <div class="table-row">
-          <strong>${target.chainKey}</strong>
-          <div>${target.tokenSymbol} · synced to ${target.lastSyncedBlock ?? "pending"}${target.lastError ? ` · error: ${target.lastError}` : ""}</div>
+          <strong>${escapeHtml(target.chainKey)}</strong>
+          <div>${escapeHtml(target.tokenSymbol)} · synced to ${escapeHtml(target.lastSyncedBlock ?? "pending")}${target.lastError ? ` · error: ${escapeHtml(target.lastError)}` : ""}</div>
         </div>
       `,
     )
@@ -111,10 +175,10 @@ async function showWatch(watchId) {
         .map(
           (payer) => `
             <div class="table-row">
-              <strong>${payer.tokenSymbol}</strong>
+              <strong>${escapeHtml(payer.tokenSymbol)}</strong>
               <div>
-                <div class="mono">${payer.payerAddress}</div>
-                <div>${payer.totalAmount} ${payer.tokenSymbol} across ${payer.paymentCount} payment(s)</div>
+                <div class="mono">${escapeHtml(payer.payerAddress)}</div>
+                <div>${escapeHtml(payer.totalAmount)} ${escapeHtml(payer.tokenSymbol)} across ${escapeHtml(payer.paymentCount)} payment(s)</div>
               </div>
             </div>
           `,
@@ -127,10 +191,10 @@ async function showWatch(watchId) {
         .map(
           (payment) => `
             <div class="table-row">
-              <strong>${payment.tokenSymbol}</strong>
+              <strong>${escapeHtml(payment.tokenSymbol)}</strong>
               <div>
-                <div>${payment.amount} ${payment.tokenSymbol} from <span class="mono">${payment.payerAddress}</span></div>
-                <div class="mono">${payment.txHash}</div>
+                <div>${escapeHtml(payment.amount)} ${escapeHtml(payment.tokenSymbol)} from <span class="mono">${escapeHtml(payment.payerAddress)}</span></div>
+                <div class="mono">${escapeHtml(payment.txHash)}</div>
               </div>
             </div>
           `,
@@ -142,11 +206,11 @@ async function showWatch(watchId) {
     <section class="meta">
       <div class="meta-row">
         <strong>Address</strong>
-        <span class="mono">${watch.address}</span>
+        <span class="mono">${escapeHtml(watch.address)}</span>
       </div>
       <div class="meta-row">
         <strong>Version</strong>
-        <span>${watch.dataVersion}</span>
+        <span>${escapeHtml(watch.dataVersion)}</span>
       </div>
       <div class="meta-row">
         <strong>Targets</strong>
@@ -177,7 +241,7 @@ elements.watchForm.addEventListener("submit", async (event) => {
   };
 
   try {
-    const response = await fetch("/v1/watches", {
+    const response = await apiFetch("/v1/watches", {
       method: "POST",
       headers: {
         "content-type": "application/json",
@@ -199,9 +263,36 @@ elements.watchForm.addEventListener("submit", async (event) => {
 });
 
 elements.refreshButton.addEventListener("click", async () => {
-  await loadRegistry();
-  await loadWatches();
+  try {
+    await loadRegistry();
+    await loadWatches();
+    elements.formFeedback.textContent = "";
+  } catch (error) {
+    elements.formFeedback.textContent = error instanceof Error ? error.message : String(error);
+  }
 });
 
-await loadRegistry();
-await loadWatches();
+elements.saveTokenButton.addEventListener("click", async () => {
+  setStoredToken(elements.authToken.value.trim());
+
+  try {
+    await loadRegistry();
+    await loadWatches();
+    elements.formFeedback.textContent = "";
+  } catch (error) {
+    elements.formFeedback.textContent = error instanceof Error ? error.message : String(error);
+  }
+});
+
+elements.clearTokenButton.addEventListener("click", () => {
+  setStoredToken("");
+});
+
+syncAuthUi();
+
+try {
+  await loadRegistry();
+  await loadWatches();
+} catch (error) {
+  elements.formFeedback.textContent = error instanceof Error ? error.message : String(error);
+}

@@ -4,6 +4,7 @@ import { parseAbiItem, type Address } from "viem";
 import { ChainRegistry } from "../chains/registry.js";
 import { DatabaseStore } from "../db/store.js";
 import type { ActiveTargetRecord } from "../types.js";
+import { toSafeErrorMessage } from "../utils/errors.js";
 
 const transferEvent = parseAbiItem("event Transfer(address indexed from, address indexed to, uint256 value)");
 
@@ -121,7 +122,7 @@ export class MonitorService {
         "Watch target synced",
       );
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
+      const message = toSafeErrorMessage(error, "Target sync failed");
       this.store.updateTargetError(target.id, message);
       this.logger.error(
         {

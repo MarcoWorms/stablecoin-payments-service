@@ -5,7 +5,9 @@ import { tmpdir } from "node:os";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { createApp } from "../src/app.js";
+import type { AppConfig } from "../src/types.js";
 import { normalizeAddress } from "../src/utils/address.js";
+import { toSafeErrorMessage } from "../src/utils/errors.js";
 
 const USDC_ETHEREUM = normalizeAddress("0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48");
 const WATCH_ADDRESS = normalizeAddress("0x000000000000000000000000000000000000dEaD");
@@ -147,9 +149,60 @@ describe("stablecoin payments service", () => {
     expect(secondResponse.statusCode).toBe(304);
     await context.app.close();
   });
+
+  it("requires auth on API routes when auth tokens are configured", async () => {
+    const context = await buildTestApp({
+      authTokens: ["super-secret-token"],
+    });
+
+    const unauthenticatedResponse = await context.app.inject({
+      method: "GET",
+      url: "/v1/watches",
+    });
+
+    expect(unauthenticatedResponse.statusCode).toBe(401);
+
+    const authenticatedResponse = await context.app.inject({
+      method: "GET",
+      url: "/v1/watches",
+      headers: {
+        authorization: "Bearer super-secret-token",
+      },
+    });
+
+    expect(authenticatedResponse.statusCode).toBe(200);
+    await context.app.close();
+  });
+
+  it("keeps health public even when auth is enabled", async () => {
+    const context = await buildTestApp({
+      authTokens: ["super-secret-token"],
+    });
+
+    const response = await context.app.inject({
+      method: "GET",
+      url: "/v1/health",
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json().authEnabled).toBe(true);
+    await context.app.close();
+  });
+
+  it("redacts URLs and request bodies from persisted error messages", () => {
+    const message = toSafeErrorMessage(
+      new Error(
+        'An internal error was received. URL: https://rpc.example Request body: {"method":"eth_getLogs","params":[]}',
+      ),
+    );
+
+    expect(message).not.toContain("https://rpc.example");
+    expect(message).not.toContain('"method":"eth_getLogs"');
+    expect(message).toContain("Request body omitted.");
+  });
 });
 
-async function buildTestApp() {
+async function buildTestApp(overrides: Partial<AppConfig> = {}) {
   const directory = mkdtempSync(join(tmpdir(), "stablecoin-payments-"));
   cleanupPaths.push(directory);
 
@@ -159,7 +212,12 @@ async function buildTestApp() {
     databasePath: join(directory, "test.db"),
     pollIntervalMs: 60_000,
     httpCacheTtlMs: 60_000,
+    cacheMaxEntries: 64,
+    bodyLimitBytes: 64 * 1024,
     enabledChains: ["ethereum"],
     adminUiEnabled: false,
+    allowedOrigins: [],
+    authTokens: [],
+    ...overrides,
   });
 }

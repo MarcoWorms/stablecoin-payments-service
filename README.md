@@ -8,23 +8,46 @@ track finalized stablecoin payments to one or more EVM wallet addresses, persist
 
 ## TL;DR
 
-If you only want the fastest path from zero to working:
+If you only want the fastest secure path from zero to working:
 
-1. Start the service.
+1. Create a strong API token.
+
+```bash
+openssl rand -hex 32
+```
+
+2. Put it in `.env`.
 
 ```bash
 cp .env.example .env
+```
+
+Set at least:
+
+```dotenv
+AUTH_TOKENS=replace-with-a-long-random-token
+ALLOWED_ORIGINS=https://your-app.example.com
+ETHEREUM_RPC_URL=https://...
+ARBITRUM_RPC_URL=https://...
+OPTIMISM_RPC_URL=https://...
+BASE_RPC_URL=https://...
+```
+
+3. Start the service.
+
+```bash
 docker compose up --build
 ```
 
-2. Open the built-in UI at [http://localhost:3000/ui/](http://localhost:3000/ui/).
+4. Open the built-in UI at [http://localhost:3000/ui/](http://localhost:3000/ui/).
 
-3. Paste the wallet address you want to watch and select chains.
+5. Paste the API token into the UI, then add the wallet address you want to watch.
 
-4. Fetch the payer list from:
+6. Fetch the payer list from:
 
 ```bash
-curl http://localhost:3000/v1/watches/<watch-id>/payers
+curl http://localhost:3000/v1/watches/<watch-id>/payers \
+  -H 'Authorization: Bearer replace-with-a-long-random-token'
 ```
 
 If nothing changed since your last fetch, re-send the `ETag` with `If-None-Match` and the service returns `304 Not Modified`.
@@ -60,6 +83,23 @@ This is meant to be the boring, reliable backend piece behind flows like:
 - CI workflow
 - tests for aggregation and conditional cache behavior
 - built-in `/ui/` admin panel
+
+---
+
+## Security Defaults
+
+This repo now tries to push deployers toward safer behavior:
+
+- if `NODE_ENV=production` and `AUTH_TOKENS` is empty, the service refuses to start unless you explicitly set `ALLOW_INSECURE_NO_AUTH_IN_PRODUCTION=true`
+- cross-origin browser access is disabled unless you explicitly set `ALLOWED_ORIGINS`
+- the built-in UI stores API tokens in `sessionStorage`, not long-lived local storage
+- the UI escapes persisted values before rendering them, to prevent stored XSS from labels, token symbols, or sync errors
+- the API returns generic `500` errors instead of reflecting internal stack details
+- the in-memory payer cache is bounded
+- the Docker image runs as the non-root `node` user
+- the example Compose config uses a read-only root filesystem, drops Linux capabilities, and enables `no-new-privileges`
+
+You can still run the service insecurely for throwaway local testing, but production mode makes that an explicit choice instead of a silent default.
 
 ---
 
@@ -137,6 +177,7 @@ If your product only needs "has this address paid?" or "how much has this addres
 
 ```bash
 cp .env.example .env
+# set AUTH_TOKENS and dedicated RPC URLs before production use
 docker compose up --build
 ```
 
@@ -153,6 +194,7 @@ The database file will be stored in:
 ```bash
 cp .env.example .env
 pnpm install
+# set AUTH_TOKENS before production use
 pnpm dev
 ```
 
@@ -172,8 +214,13 @@ Open:
 | `DATABASE_PATH` | `./data/stablecoin-payments.db` | SQLite file path |
 | `POLL_INTERVAL_MS` | `15000` | How often the background worker checks chains |
 | `HTTP_CACHE_TTL_MS` | `5000` | Short in-process cache TTL for repeated reads |
+| `CACHE_MAX_ENTRIES` | `256` | Max in-memory payer cache entries before old entries are evicted |
+| `BODY_LIMIT_KB` | `64` | Max HTTP request body size in kilobytes |
 | `ENABLED_CHAINS` | `ethereum,arbitrum,optimism,base` | Comma-separated enabled chains |
 | `ADMIN_UI_ENABLED` | `true` | Whether to serve the built-in UI |
+| `ALLOWED_ORIGINS` | empty | Exact browser origins allowed to call the API cross-origin |
+| `AUTH_TOKENS` | empty | Comma-separated bearer/API tokens accepted by the service |
+| `ALLOW_INSECURE_NO_AUTH_IN_PRODUCTION` | `false` | Override that lets production start without `AUTH_TOKENS` |
 | `ETHEREUM_RPC_URL` | empty | Dedicated RPC URL for Ethereum |
 | `ARBITRUM_RPC_URL` | empty | Dedicated RPC URL for Arbitrum |
 | `OPTIMISM_RPC_URL` | empty | Dedicated RPC URL for Optimism |
@@ -187,6 +234,16 @@ That is fine for quick local testing.
 
 For real usage, use dedicated RPC endpoints.
 
+### Recommended production minimum
+
+At minimum, set:
+
+- `AUTH_TOKENS`
+- `ALLOWED_ORIGINS`
+- dedicated RPC URLs for every enabled chain
+
+Do not expose the service publicly without auth unless that is a deliberate and understood choice.
+
 ---
 
 ## Zero To First Watch
@@ -199,10 +256,11 @@ You have two ways to add a watch:
 ### Using the built-in UI
 
 1. Open `/ui/`
-2. Paste the wallet address you want to watch
-3. Select one or more chains
-4. Keep "Include default stablecoin presets" checked unless you want custom-only behavior
-5. Save the watch
+2. Paste the API token if auth is enabled
+3. Paste the wallet address you want to watch
+4. Select one or more chains
+5. Keep "Include default stablecoin presets" checked unless you want custom-only behavior
+6. Save the watch
 
 ### Using the API
 
@@ -210,6 +268,7 @@ This creates or updates a watch for one address and monitors the default stablec
 
 ```bash
 curl -X POST http://localhost:3000/v1/watches \
+  -H 'authorization: Bearer replace-with-a-long-random-token' \
   -H 'content-type: application/json' \
   -d '{
     "address": "0xYourWallet",
@@ -253,7 +312,8 @@ That keeps the API simple and makes the UI easy to reason about.
 You can recover it by watched address:
 
 ```bash
-curl http://localhost:3000/v1/watches/by-address/0xYourWallet
+curl http://localhost:3000/v1/watches/by-address/0xYourWallet \
+  -H 'authorization: Bearer replace-with-a-long-random-token'
 ```
 
 ---
@@ -320,7 +380,8 @@ There are two main read endpoints:
 This is the endpoint most apps should use:
 
 ```bash
-curl http://localhost:3000/v1/watches/<watch-id>/payers
+curl http://localhost:3000/v1/watches/<watch-id>/payers \
+  -H 'authorization: Bearer replace-with-a-long-random-token'
 ```
 
 It returns a compact list of:
@@ -357,7 +418,8 @@ Example:
 Use this when you need a full audit trail:
 
 ```bash
-curl 'http://localhost:3000/v1/watches/<watch-id>/payments?limit=100'
+curl 'http://localhost:3000/v1/watches/<watch-id>/payments?limit=100' \
+  -H 'authorization: Bearer replace-with-a-long-random-token'
 ```
 
 This returns the underlying finalized payment records.
@@ -371,9 +433,9 @@ Both `/payers` and `/payments` support filters.
 Examples:
 
 ```bash
-curl 'http://localhost:3000/v1/watches/<watch-id>/payers?chainKey=ethereum'
-curl 'http://localhost:3000/v1/watches/<watch-id>/payers?tokenKey=usdc'
-curl 'http://localhost:3000/v1/watches/<watch-id>/payments?chainKey=base&tokenKey=usdc&limit=50'
+curl 'http://localhost:3000/v1/watches/<watch-id>/payers?chainKey=ethereum' -H 'authorization: Bearer replace-with-a-long-random-token'
+curl 'http://localhost:3000/v1/watches/<watch-id>/payers?tokenKey=usdc' -H 'authorization: Bearer replace-with-a-long-random-token'
+curl 'http://localhost:3000/v1/watches/<watch-id>/payments?chainKey=base&tokenKey=usdc&limit=50' -H 'authorization: Bearer replace-with-a-long-random-token'
 ```
 
 ---
@@ -388,6 +450,7 @@ If your app already has the last payer snapshot, call the endpoint like this:
 
 ```bash
 curl http://localhost:3000/v1/watches/<watch-id>/payers \
+  -H 'Authorization: Bearer replace-with-a-long-random-token' \
   -H 'If-None-Match: "<previous-etag>"'
 ```
 
@@ -439,7 +502,10 @@ The usual integration pattern is:
 ```ts
 const response = await fetch("http://stablecoin-payments:3000/v1/watches", {
   method: "POST",
-  headers: { "content-type": "application/json" },
+  headers: {
+    "content-type": "application/json",
+    authorization: "Bearer replace-with-a-long-random-token",
+  },
   body: JSON.stringify({
     address: "0xYourWallet",
     label: "Treasury",
@@ -461,7 +527,11 @@ type PayerSummary = {
 };
 
 async function hasPaid(serviceUrl: string, watchId: string, wallet: string) {
-  const response = await fetch(`${serviceUrl}/v1/watches/${watchId}/payers`);
+  const response = await fetch(`${serviceUrl}/v1/watches/${watchId}/payers`, {
+    headers: {
+      authorization: "Bearer replace-with-a-long-random-token",
+    },
+  });
   const payload = await response.json();
 
   return payload.items.some(
@@ -474,7 +544,11 @@ async function hasPaid(serviceUrl: string, watchId: string, wallet: string) {
 
 ```ts
 async function amountPaid(serviceUrl: string, watchId: string, wallet: string) {
-  const response = await fetch(`${serviceUrl}/v1/watches/${watchId}/payers`);
+  const response = await fetch(`${serviceUrl}/v1/watches/${watchId}/payers`, {
+    headers: {
+      authorization: "Bearer replace-with-a-long-random-token",
+    },
+  });
   const payload = await response.json();
 
   const payer = payload.items.find(
@@ -581,6 +655,7 @@ Default confirmation buffers are currently:
 - This repo is designed for one active poller per database.
 - Running multiple service instances against the same SQLite file is not supported.
 - For production, use dedicated RPC URLs.
+- For production, enable auth and TLS in front of the service.
 - SQLite is the right default for single-instance deployment.
 - If you want horizontal scale, split the worker role or swap the storage layer.
 

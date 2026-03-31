@@ -133,6 +133,10 @@ export interface AppConfig {
   databasePath: string;
   pollIntervalMs: number;
   httpCacheTtlMs: number;
+  cacheMaxEntries: number;
+  bodyLimitBytes: number;
   enabledChains: ChainKey[];
   adminUiEnabled: boolean;
+  allowedOrigins: string[];
+  authTokens: string[];
 }
