@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Stablecoin Payments Service</title>
+    <link rel="stylesheet" href="/ui/styles.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <section class="hero">
+        <p class="eyebrow">Stablecoin Payments Service</p>
+        <h1>Track who has paid your wallet in stablecoins.</h1>
+        <p class="lede">
+          Add a wallet, enable chains, and the service will keep a finalized payer ledger for you.
+        </p>
+      </section>
+
+      <section class="card">
+        <div class="section-head">
+          <h2>Create or update a watch</h2>
+          <button id="refreshButton" class="ghost" type="button">Refresh</button>
+        </div>
+        <form id="watchForm" class="stack">
+          <label>
+            Wallet address
+            <input id="address" name="address" placeholder="0x..." autocomplete="off" required />
+          </label>
+
+          <label>
+            Label
+            <input id="label" name="label" placeholder="Treasury" autocomplete="off" />
+          </label>
+
+          <fieldset>
+            <legend>Enabled chains</legend>
+            <div id="chains" class="chip-grid"></div>
+          </fieldset>
+
+          <label class="toggle">
+            <input id="includeDefaults" name="includeDefaults" type="checkbox" checked />
+            Include default stablecoin presets for the selected chains
+          </label>
+
+          <label>
+            Optional lookback blocks
+            <input id="lookbackBlocks" name="lookbackBlocks" type="number" min="0" placeholder="0 = only new payments" />
+          </label>
+
+          <button class="primary" type="submit">Save watch</button>
+        </form>
+        <pre id="formFeedback" class="feedback"></pre>
+      </section>
+
+      <section class="grid">
+        <article class="card">
+          <div class="section-head">
+            <h2>Active watches</h2>
+          </div>
+          <div id="watchList" class="list"></div>
+        </article>
+
+        <article class="card">
+          <div class="section-head">
+            <h2>Selected watch</h2>
+            <span id="selectedWatchBadge" class="pill">None</span>
+          </div>
+          <div id="watchDetails" class="details empty">Select a watch to inspect payers and payments.</div>
+        </article>
+      </section>
+    </main>
+
+    <script type="module" src="/ui/app.js"></script>
+  </body>
+</html>
