@@ -108,16 +108,22 @@ You can still run the service insecurely for throwaway local testing, but produc
 ### Chains
 
 - Ethereum
-- Arbitrum
-- Optimism
+- Polygon
 - Base
+- Optimism
+- Arbitrum
+- BSC
+- MegaETH
+- Monad
 
 ### Default tokens
 
-- USDC on Ethereum, Arbitrum, Optimism, and Base
+- USDC on Ethereum, Polygon, Base, Optimism, Arbitrum, BSC, and Monad
 - USDT on Ethereum
+- USDT on Polygon, Base, Arbitrum, and BSC
+- USDT0 on Optimism, MegaETH, and Monad
 
-If you need additional tokens, including bridged or ecosystem-specific variants, add them with `customTokens` when creating the watch.
+If you need additional tokens, legacy token variants, or a chain-specific token symbol/key that differs from the defaults, add them with `customTokens` when creating the watch.
 
 That is the intended extension path. The repo is opinionated about safe defaults, but not locked down.
 
@@ -216,21 +222,27 @@ Open:
 | `HTTP_CACHE_TTL_MS` | `5000` | Short in-process cache TTL for repeated reads |
 | `CACHE_MAX_ENTRIES` | `256` | Max in-memory payer cache entries before old entries are evicted |
 | `BODY_LIMIT_KB` | `64` | Max HTTP request body size in kilobytes |
-| `ENABLED_CHAINS` | `ethereum,arbitrum,optimism,base` | Comma-separated enabled chains |
+| `ENABLED_CHAINS` | `ethereum,polygon,base,optimism,arbitrum,bsc,megaeth,monad` | Comma-separated enabled chains |
 | `ADMIN_UI_ENABLED` | `true` | Whether to serve the built-in UI |
 | `ALLOWED_ORIGINS` | empty | Exact browser origins allowed to call the API cross-origin |
 | `AUTH_TOKENS` | empty | Comma-separated bearer/API tokens accepted by the service |
 | `ALLOW_INSECURE_NO_AUTH_IN_PRODUCTION` | `false` | Override that lets production start without `AUTH_TOKENS` |
 | `ETHEREUM_RPC_URL` | empty | Dedicated RPC URL for Ethereum |
-| `ARBITRUM_RPC_URL` | empty | Dedicated RPC URL for Arbitrum |
-| `OPTIMISM_RPC_URL` | empty | Dedicated RPC URL for Optimism |
+| `POLYGON_RPC_URL` | empty | Dedicated RPC URL for Polygon |
 | `BASE_RPC_URL` | empty | Dedicated RPC URL for Base |
+| `OPTIMISM_RPC_URL` | empty | Dedicated RPC URL for Optimism |
+| `ARBITRUM_RPC_URL` | empty | Dedicated RPC URL for Arbitrum |
+| `BSC_RPC_URL` | empty | Dedicated RPC URL for BSC |
+| `MEGAETH_RPC_URL` | empty | Dedicated RPC URL for MegaETH |
+| `MONAD_RPC_URL` | empty | Dedicated RPC URL for Monad |
 
 ### Important note about RPCs
 
-If you do not set a dedicated RPC URL, the service falls back to the chain definition bundled with `viem`.
+If you do not set a dedicated RPC URL, the service falls back to the chain definition bundled with `viem` when one exists.
 
-That is fine for quick local testing.
+That is fine for quick local testing on the standard built-in chains.
+
+MegaETH and Monad do not have bundled `viem` public RPC fallbacks in this repo, so those two chains require explicit `MEGAETH_RPC_URL` and `MONAD_RPC_URL` values when enabled.
 
 For real usage, use dedicated RPC endpoints.
 
@@ -273,7 +285,7 @@ curl -X POST http://localhost:3000/v1/watches \
   -d '{
     "address": "0xYourWallet",
     "label": "Treasury",
-    "chains": ["ethereum", "arbitrum", "optimism", "base"],
+    "chains": ["ethereum", "polygon", "base", "optimism", "arbitrum", "bsc"],
     "includeDefaultTokens": true
   }'
 ```

@@ -200,6 +200,47 @@ describe("stablecoin payments service", () => {
     expect(message).not.toContain('"method":"eth_getLogs"');
     expect(message).toContain("Request body omitted.");
   });
+
+  it("exposes the expanded multichain registry defaults", async () => {
+    const context = await buildTestApp({
+      enabledChains: ["ethereum", "polygon", "base", "optimism", "arbitrum", "bsc", "megaeth", "monad"],
+    });
+
+    const response = await context.app.inject({
+      method: "GET",
+      url: "/v1/registry",
+    });
+
+    expect(response.statusCode).toBe(200);
+    const payload = response.json();
+    expect(payload.chains.map((entry: { key: string }) => entry.key)).toEqual([
+      "ethereum",
+      "polygon",
+      "base",
+      "optimism",
+      "arbitrum",
+      "bsc",
+      "megaeth",
+      "monad",
+    ]);
+    expect(payload.chains.find((entry: { key: string }) => entry.key === "polygon")?.defaultTokens).toEqual([
+      expect.objectContaining({ key: "usdc", symbol: "USDC" }),
+      expect.objectContaining({ key: "usdt", symbol: "USDT" }),
+    ]);
+    expect(payload.chains.find((entry: { key: string }) => entry.key === "optimism")?.defaultTokens).toEqual([
+      expect.objectContaining({ key: "usdc", symbol: "USDC" }),
+      expect.objectContaining({ key: "usdt", symbol: "USDT0" }),
+    ]);
+    expect(payload.chains.find((entry: { key: string }) => entry.key === "megaeth")?.defaultTokens).toEqual([
+      expect.objectContaining({ key: "usdt", symbol: "USDT0" }),
+    ]);
+    expect(payload.chains.find((entry: { key: string }) => entry.key === "monad")?.defaultTokens).toEqual([
+      expect.objectContaining({ key: "usdc", symbol: "USDC" }),
+      expect.objectContaining({ key: "usdt", symbol: "USDT0" }),
+    ]);
+
+    await context.app.close();
+  });
 });
 
 async function buildTestApp(overrides: Partial<AppConfig> = {}) {

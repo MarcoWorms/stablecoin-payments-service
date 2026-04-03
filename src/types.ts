@@ -1,6 +1,15 @@
 import type { Address } from "viem";
 
-export const SUPPORTED_CHAIN_KEYS = ["ethereum", "arbitrum", "optimism", "base"] as const;
+export const SUPPORTED_CHAIN_KEYS = [
+  "ethereum",
+  "polygon",
+  "base",
+  "optimism",
+  "arbitrum",
+  "bsc",
+  "megaeth",
+  "monad",
+] as const;
 
 export type ChainKey = (typeof SUPPORTED_CHAIN_KEYS)[number];
 
