@@ -5,19 +5,31 @@ import { ChainRegistry } from "../chains/registry.js";
 import { DatabaseStore } from "../db/store.js";
 import type { ActiveTargetRecord } from "../types.js";
 import { toSafeErrorMessage } from "../utils/errors.js";
+import { withTimeout } from "../utils/timeout.js";
 
 const transferEvent = parseAbiItem("event Transfer(address indexed from, address indexed to, uint256 value)");
+
+interface MonitorServiceOptions {
+  rpcRequestTimeoutMs?: number;
+  targetErrorRetryMs?: number;
+}
 
 export class MonitorService {
   private timer: NodeJS.Timeout | null = null;
   private running = false;
+  private readonly rpcRequestTimeoutMs: number;
+  private readonly targetErrorRetryMs: number;
 
   constructor(
     private readonly store: DatabaseStore,
     private readonly registry: ChainRegistry,
     private readonly logger: FastifyBaseLogger,
     private readonly pollIntervalMs: number,
-  ) {}
+    options: MonitorServiceOptions = {},
+  ) {
+    this.rpcRequestTimeoutMs = options.rpcRequestTimeoutMs ?? 5_000;
+    this.targetErrorRetryMs = options.targetErrorRetryMs ?? 60_000;
+  }
 
   start(): void {
     if (this.timer) {
@@ -47,6 +59,19 @@ export class MonitorService {
     try {
       const targets = this.store.listActiveTargets();
       for (const target of targets) {
+        if (this.shouldBackOffTarget(target)) {
+          this.logger.debug(
+            {
+              watchId: target.watchId,
+              targetId: target.id,
+              chainKey: target.chainKey,
+              token: target.tokenSymbol,
+            },
+            "Skipping target sync during retry backoff window",
+          );
+          continue;
+        }
+
         await this.syncTarget(target);
       }
     } finally {
@@ -58,7 +83,13 @@ export class MonitorService {
     try {
       const client = this.registry.getClient(target.chainKey);
       const chain = this.registry.getChain(target.chainKey);
-      const currentBlock = Number(await client.getBlockNumber());
+      const currentBlock = Number(
+        await withTimeout(
+          client.getBlockNumber(),
+          this.rpcRequestTimeoutMs,
+          `${chain.name} head lookup`,
+        ),
+      );
       const finalizedHead = currentBlock - target.confirmations;
 
       if (finalizedHead < target.nextFromBlock) {
@@ -70,15 +101,19 @@ export class MonitorService {
 
       while (fromBlock <= finalizedHead) {
         const toBlock = Math.min(finalizedHead, fromBlock + this.registry.getMaxBatchBlocks(target.chainKey) - 1);
-        const logs = await client.getLogs({
-          address: target.tokenAddress,
-          event: transferEvent,
-          args: {
-            to: target.watchAddress,
-          },
-          fromBlock: BigInt(fromBlock),
-          toBlock: BigInt(toBlock),
-        });
+        const logs = await withTimeout(
+          client.getLogs({
+            address: target.tokenAddress,
+            event: transferEvent,
+            args: {
+              to: target.watchAddress,
+            },
+            fromBlock: BigInt(fromBlock),
+            toBlock: BigInt(toBlock),
+          }),
+          this.rpcRequestTimeoutMs,
+          `${chain.name} transfer scan`,
+        );
 
         for (const log of logs) {
           const args = log.args as { from?: Address; to?: Address; value?: bigint };
@@ -86,7 +121,7 @@ export class MonitorService {
             continue;
           }
 
-          const finalizedAt = await this.resolveBlockTimestampIso(timestampCache, client, log.blockNumber);
+          const finalizedAt = await this.resolveBlockTimestampIso(timestampCache, client, chain.name, log.blockNumber);
           this.store.recordPayment({
             watchId: target.watchId,
             targetId: target.id,
@@ -140,6 +175,7 @@ export class MonitorService {
   private async resolveBlockTimestampIso(
     cache: Map<number, string>,
     client: ReturnType<ChainRegistry["getClient"]>,
+    chainName: string,
     blockNumber: bigint,
   ): Promise<string> {
     const numericBlock = Number(blockNumber);
@@ -148,9 +184,26 @@ export class MonitorService {
       return cached;
     }
 
-    const block = await client.getBlock({ blockNumber });
+    const block = await withTimeout(
+      client.getBlock({ blockNumber }),
+      this.rpcRequestTimeoutMs,
+      `${chainName} block lookup`,
+    );
     const value = new Date(Number(block.timestamp) * 1_000).toISOString();
     cache.set(numericBlock, value);
     return value;
+  }
+
+  private shouldBackOffTarget(target: ActiveTargetRecord): boolean {
+    if (!target.lastError) {
+      return false;
+    }
+
+    const lastFailureAt = Date.parse(target.updatedAt);
+    if (Number.isNaN(lastFailureAt)) {
+      return false;
+    }
+
+    return Date.now() - lastFailureAt < this.targetErrorRetryMs;
   }
 }
