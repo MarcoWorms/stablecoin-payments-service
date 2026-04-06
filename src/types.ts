@@ -141,6 +141,8 @@ export interface AppConfig {
   port: number;
   databasePath: string;
   pollIntervalMs: number;
+  rpcRequestTimeoutMs: number;
+  targetErrorRetryMs: number;
   httpCacheTtlMs: number;
   cacheMaxEntries: number;
   bodyLimitBytes: number;

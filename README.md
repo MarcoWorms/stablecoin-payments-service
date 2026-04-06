@@ -219,6 +219,8 @@ Open:
 | `PORT` | `3000` | HTTP port |
 | `DATABASE_PATH` | `./data/stablecoin-payments.db` | SQLite file path |
 | `POLL_INTERVAL_MS` | `15000` | How often the background worker checks chains |
+| `RPC_REQUEST_TIMEOUT_MS` | `5000` | Per-request timeout for RPC reads before the worker fails fast |
+| `TARGET_ERROR_RETRY_MS` | `60000` | Backoff window before retrying a target that just failed |
 | `HTTP_CACHE_TTL_MS` | `5000` | Short in-process cache TTL for repeated reads |
 | `CACHE_MAX_ENTRIES` | `256` | Max in-memory payer cache entries before old entries are evicted |
 | `BODY_LIMIT_KB` | `64` | Max HTTP request body size in kilobytes |
@@ -245,6 +247,14 @@ That is fine for quick local testing on the standard built-in chains.
 MegaETH and Monad do not have bundled `viem` public RPC fallbacks in this repo, so those two chains require explicit `MEGAETH_RPC_URL` and `MONAD_RPC_URL` values when enabled.
 
 For real usage, use dedicated RPC endpoints.
+
+### Sync hardening defaults
+
+The background poller now fails fast instead of hanging indefinitely on stalled RPC calls.
+
+If a target errors, the worker records the failure and backs off that target for `TARGET_ERROR_RETRY_MS` before trying it again.
+
+That keeps one degraded chain or RPC provider from being hammered on every poll tick.
 
 ### Recommended production minimum
 
@@ -667,6 +677,8 @@ Default confirmation buffers are currently:
 - This repo is designed for one active poller per database.
 - Running multiple service instances against the same SQLite file is not supported.
 - For production, use dedicated RPC URLs.
+- Keep `RPC_REQUEST_TIMEOUT_MS` low enough that a bad RPC does not wedge the poll loop.
+- Keep `TARGET_ERROR_RETRY_MS` high enough that a failing target is not retried on every tick.
 - For production, enable auth and TLS in front of the service.
 - SQLite is the right default for single-instance deployment.
 - If you want horizontal scale, split the worker role or swap the storage layer.

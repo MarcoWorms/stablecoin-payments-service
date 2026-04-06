@@ -96,10 +96,15 @@ export async function createApp(config: AppConfig = loadConfig()): Promise<AppCo
   });
 
   const store = new DatabaseStore(config.databasePath);
-  const registry = new ChainRegistry(config.enabledChains);
-  const watchService = new WatchService(store, registry, app.log);
+  const registry = new ChainRegistry(config.enabledChains, {
+    rpcRequestTimeoutMs: config.rpcRequestTimeoutMs,
+  });
+  const watchService = new WatchService(store, registry, app.log, config.rpcRequestTimeoutMs);
   const payersCache = new ResponseCache<unknown>(config.httpCacheTtlMs, config.cacheMaxEntries);
-  const monitor = new MonitorService(store, registry, app.log, config.pollIntervalMs);
+  const monitor = new MonitorService(store, registry, app.log, config.pollIntervalMs, {
+    rpcRequestTimeoutMs: config.rpcRequestTimeoutMs,
+    targetErrorRetryMs: config.targetErrorRetryMs,
+  });
 
   await app.register(helmet, {
     global: true,

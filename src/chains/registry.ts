@@ -220,6 +220,10 @@ const DEFAULT_TOKENS: Record<ChainKey, TokenDefinition[]> = {
   ],
 };
 
+interface ChainRegistryOptions {
+  rpcRequestTimeoutMs?: number;
+}
+
 function getFallbackRpcUrl(chain: RuntimeChainDefinition): string {
   const fallback = chain.chain.rpcUrls.default.http[0];
 
@@ -232,8 +236,11 @@ function getFallbackRpcUrl(chain: RuntimeChainDefinition): string {
 
 export class ChainRegistry {
   private readonly clients = new Map<ChainKey, PublicClient>();
+  private readonly rpcRequestTimeoutMs: number;
 
-  constructor(private readonly enabledChains: ChainKey[]) {}
+  constructor(private readonly enabledChains: ChainKey[], options: ChainRegistryOptions = {}) {
+    this.rpcRequestTimeoutMs = options.rpcRequestTimeoutMs ?? 5_000;
+  }
 
   listEnabledChains(): Array<ChainDefinition & { defaultTokens: TokenDefinition[]; rpcConfigured: boolean }> {
     return this.enabledChains.map((key) => {
@@ -277,7 +284,10 @@ export class ChainRegistry {
     const transportUrl = process.env[definition.envRpcKey] ?? getFallbackRpcUrl(definition);
     const client = createPublicClient({
       chain: definition.chain,
-      transport: http(transportUrl),
+      transport: http(transportUrl, {
+        retryCount: 0,
+        timeout: this.rpcRequestTimeoutMs,
+      }),
     });
 
     this.clients.set(key, client);

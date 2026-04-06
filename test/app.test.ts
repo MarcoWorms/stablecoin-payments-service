@@ -252,6 +252,8 @@ async function buildTestApp(overrides: Partial<AppConfig> = {}) {
     port: 0,
     databasePath: join(directory, "test.db"),
     pollIntervalMs: 60_000,
+    rpcRequestTimeoutMs: 5_000,
+    targetErrorRetryMs: 60_000,
     httpCacheTtlMs: 60_000,
     cacheMaxEntries: 64,
     bodyLimitBytes: 64 * 1024,

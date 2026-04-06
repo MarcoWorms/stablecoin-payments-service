@@ -1,6 +1,7 @@
 import type { FastifyBaseLogger } from "fastify";
 
 import { normalizeAddress } from "../utils/address.js";
+import { withTimeout } from "../utils/timeout.js";
 import { ChainRegistry } from "../chains/registry.js";
 import { DatabaseStore } from "../db/store.js";
 import type { ChainKey, CreateWatchInput, WatchRecord, WatchTargetInput } from "../types.js";
@@ -10,6 +11,7 @@ export class WatchService {
     private readonly store: DatabaseStore,
     private readonly registry: ChainRegistry,
     private readonly logger: FastifyBaseLogger,
+    private readonly rpcRequestTimeoutMs = 5_000,
   ) {}
 
   async upsertWatch(input: CreateWatchInput): Promise<WatchRecord> {
@@ -88,7 +90,13 @@ export class WatchService {
 
     const client = this.registry.getClient(chainKey);
     const chain = this.registry.getChain(chainKey);
-    const currentBlock = Number(await client.getBlockNumber());
+    const currentBlock = Number(
+      await withTimeout(
+        client.getBlockNumber(),
+        this.rpcRequestTimeoutMs,
+        `${chain.name} start-block lookup`,
+      ),
+    );
     const finalizedHead = Math.max(0, currentBlock - chain.defaultConfirmations);
     const startBlock =
       lookbackBlocks && lookbackBlocks > 0 ? Math.max(0, finalizedHead - lookbackBlocks + 1) : finalizedHead + 1;
